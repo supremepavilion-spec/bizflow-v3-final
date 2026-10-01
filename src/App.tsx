@@ -3685,15 +3685,17 @@ function ACBillForm({ D, setModal, flash, logAudit, reload, modal }) {
     setAccount(code)
     const b = (D.acBankAccounts || []).find(x => x.code === code)
     if (!b) return
-    const c = acCoOf(D, b.company)
-    setCustomer(c?.customer || '')
+    setCustomer(b.customer || '')   // 顾客存在银行户口本身，不是公司
+    const useDate = isFirst && b.assignDate ? b.assignDate : date   // 首期账单：带出这户口的发出日
+    if (useDate !== date) setDate(useDate)
     if (isFirst) {
-      const pf = acProratedFee(b.monthlyFee || 0, date)
+      const pf = acProratedFee(b.monthlyFee || 0, useDate)
       setItems(prev => {
         const base = prev.filter(it => it.name !== '当月月费(按天)')
-        return [...base, { name: '当月月费(按天)', amount: +pf.toFixed(2), cost: 0, remark: '发出日 ' + date + ' 按天算', kind: 'fee' }]
+        return [...base, { name: '当月月费(按天)', amount: +pf.toFixed(2), cost: 0, remark: '发出日 ' + useDate + ' 按天算', kind: 'fee' }]
       })
-      setShare(+acProratedFee(b.supplierShare || 0, date).toFixed(2))
+      setShare(+acProratedFee(b.supplierShare || 0, useDate).toFixed(2))
+      setPeriod(acPeriodOf(useDate))
     } else {
       setItems([{ name: '月费', amount: b.monthlyFee || 0, cost: 0, remark: '', kind: 'fee' }])
       setShare(+(b.supplierShare || 0))
@@ -3719,6 +3721,10 @@ function ACBillForm({ D, setModal, flash, logAudit, reload, modal }) {
     if (!account) return flash('请选择银行户口')
     if (!customer) return flash('这个户口所属公司还没发给顾客，或请选顾客')
     if (!items.length) return flash('请至少加一个项目')
+    // 安全检查：这户口正常要给卡商分成，但现在算出来是 0 — 很可能是漏填，提醒一下
+    if (ba && baPaying(ba) && (+ba.supplierShare || 0) > 0 && (+share || 0) <= 0) {
+      if (!confirm(`这户口平常要给卡商 ${acSupName(D, co?.supplier)} 分成，但现在「给卡商」栏是 0 或空的。\n\n确定要这样保存吗？（保存后不会产生卡商应付）`)) return
+    }
     setBusy(true)
     const no = editing?.no || await nextNo('BILL')
     await db.saveAcBill({ no, billType, account, customer, date, period, items, note: '' })
